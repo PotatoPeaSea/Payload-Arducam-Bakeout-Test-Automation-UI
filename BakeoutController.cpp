@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QImageReader>
+#include <QBuffer>
 #include <QTimer>
 
 BakeoutController::BakeoutController(ArduCamController* cam, QObject* parent)
@@ -130,6 +132,21 @@ void BakeoutController::onJpegReceived(const QByteArray& jpeg) {
     }
 
     if (m_capturingSeries) {
+        QBuffer buffer;
+        buffer.setData(jpeg);
+        buffer.open(QIODevice::ReadOnly);
+        QImageReader reader(&buffer, "JPG");
+        QSize imgSize = reader.size();
+
+        if (imgSize.isValid() && (imgSize.width() != 2592 || imgSize.height() != 1944)) {
+            setStatus(QString("Warning: Image was %1x%2. Expected 2592x1944. Enforcing resolution and retaking...")
+                      .arg(imgSize.width()).arg(imgSize.height()));
+            m_cam->setResolution(6);
+            // Give the camera 1.5s to apply the resolution before retaking
+            QTimer::singleShot(1500, m_cam, [this]() { m_cam->captureSingle(); });
+            return;
+        }
+
         int imageNum = m_captureTotal - m_captureRemaining + 1;
         QString path = QString("%1/%2-%3-%4.jpg")
                        .arg(m_captureFolder).arg(m_capturePrefix)

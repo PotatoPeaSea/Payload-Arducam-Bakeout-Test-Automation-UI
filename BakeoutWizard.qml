@@ -25,6 +25,7 @@ Window {
     property bool waitingForStream: false
     property bool streamOpened: false
     property var  capturedImagesList: []
+    property bool skipCalibration: false
 
     // ── Base steps (before the 24-angle loop) ─────────────────────
     readonly property var baseSteps: {
@@ -61,7 +62,11 @@ Window {
             s.push({ type:"instruction", title:"Verify Setup",
                      body:"Check the live preview in the ArduCam Host window. Confirm the target fills the frame exactly as it did during the Pre-Bakeout test. Reposition if needed, then click Next." })
         }
-        // Both modes share: stop-stream → calibrate → record
+        // Both modes share: stop-stream → optionally calibrate → record/enter exposure
+        s.push({ type:"instruction", action:"chooseExposure",
+                 title:"Configure Exposure",
+                 body:"You can either run the automatic exposure calibration routine, or enter a known exposure value manually." })
+
         s.push({ type:"auto", action:"calibrate",
                  title:"Calibrating Exposure",
                  body:"Stopping stream and running automatic exposure calibration.\nAdjusting until average brightness = 160 ± 5…" })
@@ -125,6 +130,7 @@ Window {
             calibrateDelay.start()
         } else if (st.action === "setMaxRes") {
             ArduCam.setResolution(6)
+            timerResolutionDelay.start()
         } else if (st.action === "captureImages") {
             capturedImagesList = []
             BakeoutCtrl.createFolder(mode)
@@ -139,6 +145,11 @@ Window {
 
         if (!inLoop) {
             stepIndex++
+            if (skipCalibration) {
+                while (stepIndex < baseSteps.length && (baseSteps[stepIndex].action === "calibrate" || baseSteps[stepIndex].action === "recordExposure")) {
+                    stepIndex++
+                }
+            }
             if (stepIndex >= baseSteps.length) { inLoop = true; loopCapture = true }
             _refreshStep(); _trigger()
         } else if (!loopCapture) {
@@ -166,6 +177,11 @@ Window {
             else { currentAngle -= 15; loopCapture = false }
         } else {
             stepIndex--
+            if (skipCalibration) {
+                while (stepIndex >= 0 && (baseSteps[stepIndex].action === "recordExposure" || baseSteps[stepIndex].action === "calibrate")) {
+                    stepIndex--
+                }
+            }
         }
         _refreshStep()
     }
@@ -190,9 +206,8 @@ Window {
         }
         function onImageCaptured(path, idx) {
             Qt.callLater(function() {
-                var arr = capturedImagesList
-                arr.push("file:///" + path)
-                capturedImagesList = arr
+                // concat returns a new array, forcing the QML property binding to update UI
+                capturedImagesList = capturedImagesList.concat(["file:///" + path])
             })
         }
         function onImagesSaved(count) {
@@ -216,17 +231,13 @@ Window {
             }
         }
         function onBusyChanged() {
-            if (!ArduCam.busy && waitAuto && currentStepObj.action === "setMaxRes") {
-                // Add an explicit delay here to ensure the camera hardware fully switches resolution 
-                // before we allow the capture loop to slam it with requests.
-                timerResolutionDelay.start()
-            }
+            // No longer rely on busyChanged for setMaxRes as it's too fast and can cause signal loops/crashes
         }
     }
 
     Timer {
         id: timerResolutionDelay
-        interval: 1000
+        interval: 1500
         repeat: false
         onTriggered: {
             waitAuto = false
@@ -291,6 +302,48 @@ Window {
                         wrapMode: Text.WordWrap; width: parent.width }
                 Label { text: currentStepObj.body ?? ""; font.pixelSize: 13
                         wrapMode: Text.WordWrap; width: parent.width; lineHeight: 1.5 }
+                
+                // For chooseExposure step
+                Column {
+                    visible: currentStepObj.action === "chooseExposure"
+                    spacing: 16; width: parent.width
+                    
+                    Rectangle { width: parent.width; height: 1; color: "#ccc" }
+                    
+                    RowLayout {
+                        spacing: 16
+                        Button {
+                            text: "Run Auto-Calibration →"
+                            highlighted: true
+                            onClicked: {
+                                skipCalibration = false
+                                wizard.goNext()
+                            }
+                        }
+                        
+                        Label { text: "  - or -  "; font.bold: true }
+
+                        TextField {
+                            id: manualExposureInput
+                            placeholderText: "Auto (µs)"
+                            validator: IntValidator { bottom: 1; top: 1000000 }
+                            onAccepted: manualExpBtn.clicked()
+                            Layout.preferredWidth: 100
+                        }
+                        Button {
+                            id: manualExpBtn
+                            text: "Set Manual Exposure →"
+                            enabled: manualExposureInput.text.length > 0
+                            onClicked: {
+                                var val = parseInt(manualExposureInput.text)
+                                ArduCam.setExposureUs(val)
+                                exposureResult = val
+                                skipCalibration = true
+                                wizard.goNext()
+                            }
+                        }
+                    }
+                }
                 
                 Column {
                     visible: currentStepObj.title === "Rotate Apparatus"
@@ -407,6 +460,7 @@ Window {
                           : (currentStepObj.type === "auto" && waitAuto) ? "Please wait…"
                           : "Next →"
                     enabled: !waitAuto
+                    visible: currentStepObj.action !== "chooseExposure"
                     highlighted: true
                     onClicked: wizard.goNext()
                 }

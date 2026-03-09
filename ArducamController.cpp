@@ -207,8 +207,9 @@ void ArduCamController::onReadyRead() {
                         QTimer::singleShot(50, this, &ArduCamController::drainQueue);
                     }
                 } else {
-                    // Optional: safety cap so a broken stream doesn't blow RAM
-                    const int maxJpeg = 1024 * 1024; // 1MB
+                    // Safety cap so a broken stream doesn't blow RAM
+                    // A 5MP image can easily be up to 5MB, so use 10MB as the safety limit
+                    const int maxJpeg = 10 * 1024 * 1024; // 10MB
                     if (m_currentJpeg.size() > maxJpeg) {
                         emit logLine("ERROR: JPEG buffer overflow (no FF D9 found). Resetting parser.");
                         m_currentJpeg.clear();
