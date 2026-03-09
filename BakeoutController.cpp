@@ -147,7 +147,8 @@ void BakeoutController::onJpegReceived(const QByteArray& jpeg) {
             setStatus(QString("All %1 images captured at %2°.").arg(m_captureTotal).arg(m_captureAngle));
             emit imagesSaved(m_captureTotal);
         } else {
-            QTimer::singleShot(100, m_cam, [this]() { m_cam->captureSingle(); });
+            // Give the ArduCam firmware some breathing room before the next capture command
+            QTimer::singleShot(500, m_cam, [this]() { m_cam->captureSingle(); });
         }
     }
 }

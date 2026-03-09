@@ -148,6 +148,13 @@ Window {
         }
     }
 
+    function skipAngle() {
+        if (waitAuto || !inLoop || loopCapture) return
+        currentAngle += 15
+        if (currentAngle >= 360) { complete = true; _refreshStep() }
+        else { loopCapture = true; _refreshStep(); _trigger() }
+    }
+
     function goBack() {
         if (waitAuto || stepIndex <= 0) return
         if (complete) { complete = false; _refreshStep(); return }
@@ -176,18 +183,24 @@ Window {
             wizard._refreshStep()
         }
         function onCalibrationFailed(reason) {
-            waitAuto = false
-            autoErrorMsg = "Calibration failed: " + reason
+            Qt.callLater(function() {
+                waitAuto = false
+                autoErrorMsg = "Calibration failed: " + reason
+            })
         }
         function onImageCaptured(path, idx) {
-            var arr = capturedImagesList
-            arr.push("file:///" + path)
-            capturedImagesList = arr
+            Qt.callLater(function() {
+                var arr = capturedImagesList
+                arr.push("file:///" + path)
+                capturedImagesList = arr
+            })
         }
         function onImagesSaved(count) {
-            waitAuto = false
-            loopCapture = false
-            wizard._refreshStep()
+            Qt.callLater(function() {
+                waitAuto = false
+                loopCapture = false
+                wizard._refreshStep()
+            })
         }
     }
 
@@ -204,9 +217,20 @@ Window {
         }
         function onBusyChanged() {
             if (!ArduCam.busy && waitAuto && currentStepObj.action === "setMaxRes") {
-                waitAuto = false
-                Qt.callLater(function() { wizard._refreshStep() })
+                // Add an explicit delay here to ensure the camera hardware fully switches resolution 
+                // before we allow the capture loop to slam it with requests.
+                timerResolutionDelay.start()
             }
+        }
+    }
+
+    Timer {
+        id: timerResolutionDelay
+        interval: 1000
+        repeat: false
+        onTriggered: {
+            waitAuto = false
+            wizard._refreshStep()
         }
     }
 
@@ -272,25 +296,35 @@ Window {
                     visible: currentStepObj.title === "Rotate Apparatus"
                     spacing: 12; width: parent.width
                     Label { text: "Images captured for " + currentAngle + "°:" ; font.bold: true }
-                    Row {
-                        spacing: 8
+                    GridLayout {
+                        columns: 3
+                        rowSpacing: 10
+                        columnSpacing: 10
                         Repeater {
                             model: capturedImagesList
                             Image {
                                 source: modelData
                                 cache: false
-                                width: 90; height: 67
+                                width: 140; height: 105
                                 fillMode: Image.PreserveAspectCrop
                             }
                         }
                     }
-                    Button {
-                        text: "Retake Images for " + currentAngle + "°"
-                        onClicked: {
-                            capturedImagesList = []
-                            loopCapture = true
-                            wizard._refreshStep()
-                            wizard._trigger()
+                    RowLayout {
+                        spacing: 12
+                        Button {
+                            text: "Retake Images for " + currentAngle + "°"
+                            onClicked: {
+                                capturedImagesList = []
+                                loopCapture = true
+                                wizard._refreshStep()
+                                wizard._trigger()
+                            }
+                        }
+                        Button {
+                            text: "Skip Angle " + (currentAngle + 15) + "°"
+                            visible: currentStepObj.title === "Rotate Apparatus"
+                            onClicked: wizard.skipAngle()
                         }
                     }
                 }
@@ -320,15 +354,17 @@ Window {
                     wrapMode: Text.WordWrap; width: parent.width; opacity: 0.8 
                 }
 
-                Row {
-                    spacing: 5
+                GridLayout {
+                    columns: 5
+                    rowSpacing: 5
+                    columnSpacing: 5
                     visible: currentStepObj.action === "captureImages" && capturedImagesList.length > 0
                     Repeater {
                         model: capturedImagesList
                         Image {
                             source: modelData
                             cache: false
-                            width: 90; height: 67
+                            width: 100; height: 75
                             fillMode: Image.PreserveAspectCrop
                         }
                     }
