@@ -43,13 +43,22 @@ void BakeoutController::startCalibration() {
     if (m_calibrating || m_capturingSeries) return;
 
     m_cam->setAutoExposure(false);
+    
+    // Explicitly enforce lowest resolution (0 = 320x240) to make calibration extremely fast
+    m_cam->setResolution(0);
+
     m_calibrating  = true;
     m_calLow       = 100;
     m_calHigh      = 500000;
     m_calAttempts  = 0;
     setBusy(true);
-    setStatus("Starting exposure calibration...");
-    doNextCalibrationCapture();
+    setStatus("Setting camera to low resolution (320x240) for fast calibration...");
+
+    // Give the camera 1.5s to apply the resolution drop before capturing the first frame
+    QTimer::singleShot(1500, this, [this]() {
+        setStatus("Starting exposure calibration...");
+        doNextCalibrationCapture();
+    });
 }
 
 void BakeoutController::doNextCalibrationCapture() {
@@ -91,6 +100,15 @@ void BakeoutController::captureImages(const QString& folder, const QString& pref
     setBusy(true);
     setStatus(QString("Capturing %1 images at %2°...").arg(count).arg(angle));
     m_cam->captureSingle();
+}
+
+void BakeoutController::cancelCapture() {
+    if (m_capturingSeries) {
+        m_capturingSeries = false;
+        setBusy(false);
+        setStatus("Image capture cancelled by user.");
+        emit captureCancelled();
+    }
 }
 
 // ─── JPEG handler ─────────────────────────────────────────────────────────────

@@ -68,6 +68,7 @@ signals:
 private slots:
     void onReadyRead();
     void onError(QSerialPort::SerialPortError e);
+    void onWatchdogTimeout();
 
 private:
     void enqueueCommand(const QByteArray &cmd);
@@ -86,6 +87,7 @@ private:
 
     QQueue<QByteArray> m_cmdQueue;
     QTimer m_cmdTimer;
+    QTimer m_watchdogTimer;
     bool m_busy = false;
     bool m_waitingForJpeg = false; // pauses queue after 0x10 until JPEG received
 

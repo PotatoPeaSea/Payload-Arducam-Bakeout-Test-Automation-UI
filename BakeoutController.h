@@ -22,6 +22,7 @@ public:
     Q_INVOKABLE void startCalibration();
     Q_INVOKABLE void captureImages(const QString& folder, const QString& prefix,
                                    int angle, int count);
+    Q_INVOKABLE void cancelCapture();
     Q_INVOKABLE void createFolder(const QString& name);
     Q_INVOKABLE void stopStreamingIfActive();
 
@@ -32,6 +33,7 @@ signals:
     void calibrationFailed(const QString& reason);
     void imageCaptured(const QString& path, int index);
     void imagesSaved(int count);
+    void captureCancelled();
     void busyChanged();
 
 private slots:

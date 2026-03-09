@@ -1,12 +1,7 @@
 #include "ArduCamController.h"
 #include <QSerialPortInfo>
 
-static bool endsWithFF_D9(const QByteArray& data) {
-    int n = data.size();
-    return (n >= 2 &&
-            (quint8)data[n - 2] == 0xFF &&
-            (quint8)data[n - 1] == 0xD9);
-}
+// Controller Implementation
 
 ArduCamController::ArduCamController(QObject* parent) : QObject(parent) {
     connect(&m_serial, &QSerialPort::readyRead, this, &ArduCamController::onReadyRead);
@@ -16,6 +11,11 @@ ArduCamController::ArduCamController(QObject* parent) : QObject(parent) {
     m_cmdTimer.setSingleShot(true);
     m_cmdTimer.setInterval(50); // 50 ms between commands
     connect(&m_cmdTimer, &QTimer::timeout, this, &ArduCamController::drainQueue);
+
+    // Watchdog timer
+    m_watchdogTimer.setSingleShot(true);
+    m_watchdogTimer.setInterval(30000); // 30 seconds
+    connect(&m_watchdogTimer, &QTimer::timeout, this, &ArduCamController::onWatchdogTimeout);
 }
 
 QStringList ArduCamController::availablePorts() const {
@@ -55,6 +55,7 @@ void ArduCamController::connectPort(const QString& portName, int baud) {
 void ArduCamController::disconnectPort() {
     // Flush the command queue
     m_cmdTimer.stop();
+    m_watchdogTimer.stop();
     m_cmdQueue.clear();
     m_waitingForJpeg = false;
     if (m_busy) {
@@ -92,6 +93,7 @@ void ArduCamController::drainQueue() {
             m_busy = false;
             emit busyChanged();
         }
+        m_watchdogTimer.stop();
         return;
     }
 
@@ -104,6 +106,8 @@ void ArduCamController::drainQueue() {
         emit busyChanged();
     }
 
+    m_watchdogTimer.start(); // Start or restart watchdog for the new command
+
     // For CAPTURE_SINGLE (0x10): don't use the pacing timer.
     // Instead, hold the queue until the full JPEG response has been received.
     // This prevents the next 0x10 arriving while the camera is still capturing.
@@ -112,6 +116,14 @@ void ArduCamController::drainQueue() {
         // drainQueue() will be called again from onReadyRead() once JPEG completes
     } else {
         m_cmdTimer.start(); // fires after 50 ms → next drainQueue()
+    }
+}
+
+void ArduCamController::onWatchdogTimeout() {
+    if (m_busy || m_waitingForJpeg) {
+        emit logLine("ERROR: Command watchdog timeout! Force-draining queue.");
+        m_waitingForJpeg = false;
+        drainQueue();
     }
 }
 
@@ -190,15 +202,27 @@ void ArduCamController::onReadyRead() {
                 m_currentJpeg += m_rxBuffer;
                 m_rxBuffer.clear();
 
-                // We detect JPEG end marker
-                if (endsWithFF_D9(m_currentJpeg)) {
-                    emit jpegFrameReceived(m_currentJpeg);
+                // Detect exact End of Image marker location
+                QByteArray eoi = QByteArray::fromHex("FFD9");
+                int eoiIndex = m_currentJpeg.indexOf(eoi);
+
+                if (eoiIndex >= 0) {
+                    int endPos = eoiIndex + 2;
+                    QByteArray jpegData = m_currentJpeg.left(endPos);
+                    QByteArray remainder = m_currentJpeg.mid(endPos);
+
+                    emit jpegFrameReceived(jpegData);
 
                     m_frameCounter++;
                     emit frameCounterChanged();
 
                     m_currentJpeg.clear();
                     m_state = RxState::Text;
+
+                    // Push any remaining bytes (e.g. the next ACK text) back to the buffer
+                    m_rxBuffer = remainder;
+                    
+                    m_watchdogTimer.stop(); // Image finished successfully, stop watchdog
 
                     // If a CAPTURE_SINGLE was waiting for this JPEG to complete,
                     // now drain the next queued command.
@@ -214,6 +238,8 @@ void ArduCamController::onReadyRead() {
                         emit logLine("ERROR: JPEG buffer overflow (no FF D9 found). Resetting parser.");
                         m_currentJpeg.clear();
                         m_state = RxState::Text;
+                        m_waitingForJpeg = false; // Fix permanent queue stall on overflow
+                        QTimer::singleShot(50, this, &ArduCamController::drainQueue);
                     }
                 }
             }

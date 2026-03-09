@@ -16,7 +16,7 @@ Window {
     // ── Internal state ────────────────────────────────────────────
     property int  stepIndex:   -1         // index into baseSteps; -1 = start screen
     property bool inLoop:      false      // true once we enter the capture/rotate loop
-    property int  currentAngle: 0         // 0, 15, 30 … 345
+    property int  currentAngle: -15       // starts at -15 to trigger the Ready screen before 0°
     property bool loopCapture: true       // true = auto capture, false = instruction rotate
     property bool complete:    false
     property bool waitAuto:    false      // true = waiting for an auto step to finish
@@ -98,10 +98,16 @@ Window {
             return { type:"auto", action:"captureImages",
                      title:"Capturing Images  –  " + currentAngle + "°",
                      body:"Taking 5 images at " + currentAngle + "°…" }
-        else
-            return { type:"instruction", title:"Rotate Apparatus",
-                     body:"Rotate the test apparatus by 15°.\n\nCurrent angle: " + currentAngle +
-                          "°\nNext angle:    " + (currentAngle + 15) + "°\n\nClick Next once rotated." }
+        else {
+            if (currentAngle < 0) {
+                return { type:"instruction", title:"Ready for Capture",
+                         body:"The camera is fully configured.\n\nEnsure the test apparatus is at the starting 0° position.\n\nClick Next to begin capturing images." }
+            } else {
+                return { type:"instruction", title:"Rotate Apparatus",
+                         body:"Rotate the test apparatus by 15°.\n\nCurrent angle: " + currentAngle +
+                              "°\nNext angle:    " + (currentAngle + 15) + "°\n\nClick Next once rotated." }
+            }
+        }
     }
 
     function _refreshStep() { currentStepObj = _computeStep() }
@@ -150,7 +156,7 @@ Window {
                     stepIndex++
                 }
             }
-            if (stepIndex >= baseSteps.length) { inLoop = true; loopCapture = true }
+            if (stepIndex >= baseSteps.length) { inLoop = true; loopCapture = false; }
             _refreshStep(); _trigger()
         } else if (!loopCapture) {
             currentAngle += 15
@@ -163,7 +169,7 @@ Window {
         if (waitAuto || !inLoop || loopCapture) return
         currentAngle += 15
         if (currentAngle >= 360) { complete = true; _refreshStep() }
-        else { loopCapture = true; _refreshStep(); _trigger() }
+        else { loopCapture = false; capturedImagesList = []; _refreshStep() }
     }
 
     function goBack() {
@@ -211,6 +217,13 @@ Window {
             })
         }
         function onImagesSaved(count) {
+            Qt.callLater(function() {
+                waitAuto = false
+                loopCapture = false
+                wizard._refreshStep()
+            })
+        }
+        function onCaptureCancelled() {
             Qt.callLater(function() {
                 waitAuto = false
                 loopCapture = false
@@ -349,16 +362,16 @@ Window {
                     visible: currentStepObj.title === "Rotate Apparatus"
                     spacing: 12; width: parent.width
                     Label { text: "Images captured for " + currentAngle + "°:" ; font.bold: true }
-                    GridLayout {
-                        columns: 3
-                        rowSpacing: 10
-                        columnSpacing: 10
+                    Row {
+                        spacing: 8
                         Repeater {
                             model: capturedImagesList
                             Image {
                                 source: modelData
                                 cache: false
-                                width: 140; height: 105
+                                sourceSize.width: 100
+                                sourceSize.height: 75
+                                width: 100; height: 75
                                 fillMode: Image.PreserveAspectCrop
                             }
                         }
@@ -391,6 +404,13 @@ Window {
                         wrapMode: Text.WordWrap; width: parent.width }
                 BusyIndicator { anchors.horizontalCenter: parent.horizontalCenter; running: waitAuto }
                 
+                Button {
+                    text: "Stop Capture"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: currentStepObj.action === "captureImages" && waitAuto
+                    onClicked: BakeoutCtrl.cancelCapture()
+                }
+
                 Label { 
                     visible: currentStepObj.action === "initialize"
                     text: waitingForStream ? "Initializing JPEG mode and waiting for stream to open..." 
@@ -407,16 +427,16 @@ Window {
                     wrapMode: Text.WordWrap; width: parent.width; opacity: 0.8 
                 }
 
-                GridLayout {
-                    columns: 5
-                    rowSpacing: 5
-                    columnSpacing: 5
+                Row {
+                    spacing: 8
                     visible: currentStepObj.action === "captureImages" && capturedImagesList.length > 0
                     Repeater {
                         model: capturedImagesList
                         Image {
                             source: modelData
                             cache: false
+                            sourceSize.width: 100
+                            sourceSize.height: 75
                             width: 100; height: 75
                             fillMode: Image.PreserveAspectCrop
                         }
