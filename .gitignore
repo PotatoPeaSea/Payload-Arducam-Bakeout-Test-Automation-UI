@@ -1,0 +1,11 @@
+# Build artifacts
+build/
+CMakeLists.txt.user
+
+# Generated application data / temp folders
+temp/
+Pre-Bakeout/
+Post-Bakeout/
+
+# Antigravity artifacts
+.gemini/

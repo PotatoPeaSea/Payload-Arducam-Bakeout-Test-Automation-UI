@@ -1,0 +1,464 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import CameraUI 1.0
+
+ApplicationWindow {
+    visible: true
+    width: 1000
+    height: 600
+    title: "ArduCAM Host (Qt)"
+    color: "#E8E8E8"  // light gray background
+
+    property real zoom: zoomSlider.value
+    property bool showCmdQueue: false
+
+    RowLayout {
+        anchors.fill: parent
+        spacing: 10
+        // padding: 10
+
+        // LEFT PANEL (controls)
+        Frame {
+            Layout.preferredWidth: 320
+            Layout.fillHeight: true
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 10
+
+                GroupBox {
+                    title: "COMPort"
+                    Layout.fillWidth: true
+                    ColumnLayout {
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label { text: "Port:"; Layout.preferredWidth: 60 }
+                            ComboBox {
+                                id: portCombo
+                                Layout.fillWidth: true
+                                model: ArduCam.availablePorts()
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label { text: "Baud:"; Layout.preferredWidth: 60 }
+                            ComboBox {
+                                Layout.fillWidth: true
+                                model: [ "921600", "115200" ]
+                                currentIndex: 0
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Button {
+                                text: ArduCam.connected ? "Close" : "Connect"
+                                Layout.fillWidth: true
+                                onClicked: {
+                                    if (!ArduCam.connected)
+                                        ArduCam.connectPort(portCombo.currentText, 921600)
+                                    else
+                                        ArduCam.disconnectPort()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: "Camera"
+                    Layout.fillWidth: true
+                    ColumnLayout {
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label { text: "Pix:"; Layout.preferredWidth: 60 }
+                            ComboBox {
+                                id: resCombo
+                                Layout.fillWidth: true
+                                model: [
+                                    "320x240",
+                                    "640x480",
+                                    "1024x768",
+                                    "1280x960",
+                                    "1600x1200",
+                                    "2048x1536",
+                                    "2592x1944"
+                                ]
+                                onActivated: ArduCam.setResolution(currentIndex)
+                                enabled: ArduCam.connected && !ArduCam.busy
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Button {
+                                text: "JPEG Init"
+                                Layout.fillWidth: true
+                                enabled: ArduCam.connected && !ArduCam.busy
+                                onClicked: ArduCam.jpegInit()
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            Button {
+                                text: "Capture (Single)"
+                                Layout.fillWidth: true
+                                enabled: ArduCam.connected && !ArduCam.streaming && !ArduCam.busy
+                                onClicked: ArduCam.captureSingle()
+                            }
+
+                            CheckBox {
+                                text: "Save single shots to ./temp"
+                                enabled: ArduCam.connected && !ArduCam.streaming && !ArduCam.busy
+                                checked: ArduCam.saveSingleShots
+                                onToggled: ArduCam.saveSingleShots = checked
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Button {
+                                text: ArduCam.streaming ? "Stop Streaming" : "Start Streaming"
+                                Layout.fillWidth: true
+                                enabled: ArduCam.connected && !ArduCam.busy
+                                onClicked: {
+                                    if (!ArduCam.streaming) ArduCam.startStreaming()
+                                    else ArduCam.stopStreaming()
+                                }
+                            }
+                        }
+
+                        Rectangle { Layout.fillWidth: true; height: 1; color: "#AAAAAA"; opacity: 0.5 }
+
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 6
+                            Button {
+                                text: "Pre-Bakeout"
+                                Layout.fillWidth: true
+                                enabled: ArduCam.connected
+                                onClicked: {
+                                    var c = Qt.createComponent("BakeoutWizard.qml")
+                                    if (c.status === Component.Ready) {
+                                        var w = c.createObject(null, { mode: "Pre-Bakeout" })
+                                        w.show()
+                                    }
+                                }
+                            }
+                            Button {
+                                text: "Post-Bakeout"
+                                Layout.fillWidth: true
+                                enabled: ArduCam.connected
+                                onClicked: {
+                                    var c = Qt.createComponent("BakeoutWizard.qml")
+                                    if (c.status === Component.Ready) {
+                                        var w = c.createObject(null, { mode: "Post-Bakeout" })
+                                        w.show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // GroupBox {
+                //     title: "Exposure (EV)"
+                //     Layout.fillWidth: true
+
+                //     ColumnLayout {
+                //         spacing: 8
+
+                //         ComboBox {
+                //             id: exposureCombo
+                //             Layout.fillWidth: true
+                //             enabled: ArduCam.connected
+
+                //             model: [
+                //                 "-1.7 EV",
+                //                 "-1.3 EV",
+                //                 "-1.0 EV",
+                //                 "-0.7 EV",
+                //                 "-0.3 EV",
+                //                 "Default",
+                //                 "+0.7 EV",
+                //                 "+1.0 EV",
+                //                 "+1.3 EV",
+                //                 "+1.7 EV"
+                //             ]
+
+                //             currentIndex: 5  // default
+                //             onActivated: ArduCam.setExposureEVIndex(currentIndex)
+                //         }
+                //     }
+                // }
+
+                GroupBox {
+                    title: "Exposure"
+                    Layout.fillWidth: true
+
+                    ColumnLayout {
+                        spacing: 8
+
+                        // Auto vs manual toggle
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            CheckBox {
+                                id: autoExp
+                                text: "Auto Exposure (EV presets)"
+                                checked: true
+                                enabled: ArduCam.connected
+                                onToggled: {
+                                    ArduCam.setAutoExposure(checked)
+                                }
+                            }
+                        }
+
+                        // EV preset dropdown (enabled only in auto mode)
+                        ComboBox {
+                            id: evCombo
+                            Layout.fillWidth: true
+                            enabled: ArduCam.connected && autoExp.checked
+                            model: ["-1.7 EV","-1.3 EV","-1.0 EV","-0.7 EV","-0.3 EV","Default","+0.7 EV","+1.0 EV","+1.3 EV","+1.7 EV"]
+                            currentIndex: 5
+                            onActivated: ArduCam.setExposureEVIndex(currentIndex)   // your existing EV function
+                        }
+
+                        Rectangle { Layout.fillWidth: true; height: 1; opacity: 0.25 }
+
+                        // Manual exposure time (µs)
+                        ColumnLayout {
+                            enabled: ArduCam.connected && !autoExp.checked
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label { text: "Manual exposure (µs)"; }
+
+                                TextField {
+                                    id: expField
+                                    Layout.preferredWidth: 110
+                                    Layout.alignment: Qt.AlignRight
+                                    inputMethodHints: Qt.ImhDigitsOnly
+                                    // keep the textbox in sync with slider when not actively editing
+                                    text: expField.activeFocus
+                                          ? expField.text
+                                          : Math.round(expSlider.value).toString()
+
+                                    onAccepted: commit()
+                                    onEditingFinished: commit()
+
+                                    function commit() {
+                                        let v = parseInt(text)
+                                        if (isNaN(v)) {
+                                            text = Math.round(expSlider.value).toString()
+                                            return
+                                        }
+
+                                        // clamp to slider range
+                                        v = Math.max(expSlider.from, Math.min(expSlider.to, v))
+
+                                        expSlider.value = v
+                                        text = v.toString()
+
+                                        // send immediately when user commits textbox
+                                        ArduCam.setExposureUs(v)
+                                    }
+                                }
+
+                                Label { text: "µs" }
+                            }
+
+                            Slider {
+                                id: expSlider
+                                Layout.fillWidth: true
+                                from: 100
+                                to: 500000
+                                value: 5000
+                                enabled: ArduCam.connected && !autoExp.checked
+
+                                // update textbox while dragging (nice UX)
+                                onMoved: expField.text = Math.round(value).toString()
+
+                                // Send only on release (prevents serial spam)
+                                onPressedChanged: {
+                                    if (!pressed) {
+                                        const v = Math.round(value)
+                                        expField.text = v.toString()
+                                        ArduCam.setExposureUs(v)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Optional: line-time calibration
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Label { text: "LineTime (µs)"; }
+                            SpinBox {
+                                id: lineTimeSpin
+                                from: 1
+                                to: 200
+                                value: 20
+                                enabled: ArduCam.connected
+                                onValueModified: ArduCam.setLineTimeUs(value)
+                            }
+                            Label { text: "(calibration)"; opacity: 0.6 }
+                        }
+                    }
+                }
+
+                Item { Layout.fillHeight: true } // spacer
+            }
+        }
+
+        // RIGHT PANEL (preview + log)
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 10
+
+            Frame {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 8
+
+                    // Preview area
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: "#111"
+                        clip: true
+
+                        Image {
+                            id: preview
+                            anchors.centerIn: parent
+                            source: "image://frame/live?c=" + ArduCam.frameCounter
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            scale: zoom
+                            transformOrigin: Item.Center
+                        }
+                    }
+
+                    // Zoom + small status row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: "Zoom:" }
+                        Slider {
+                            id: zoomSlider
+                            Layout.fillWidth: true
+                            from: 0.25
+                            to: 3.0
+                            value: 1.0
+                        }
+                        Label { text: Math.round(zoomSlider.value * 100) + "%" }
+                    }
+                }
+            }
+
+            Frame {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 170
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 6
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: "Log"; font.bold: true }
+                        Item { Layout.fillWidth: true }
+                        Button {
+                            text: showCmdQueue ? "Hide Cmd Queue" : "Show Cmd Queue"
+                            onClicked: showCmdQueue = !showCmdQueue
+                        }
+                        Button {
+                            text: "Clear"
+                            onClicked: logArea.text = ""
+                        }
+                    }
+
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+
+                        TextArea {
+                            id: logArea
+                            readOnly: true
+                            wrapMode: TextArea.NoWrap
+                            selectByMouse: true
+                            font.family: "Consolas"
+                            font.pixelSize: 12
+
+                            // Important so it grows vertically and scrolling works
+                            implicitWidth: parent.width
+                        }
+                    }
+                }
+            }
+        }
+
+        // CMD QUEUE PANEL (toggle)
+        Frame {
+            visible: showCmdQueue
+            Layout.preferredWidth: 220
+            Layout.fillHeight: true
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 6
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "Cmd Queue Log"; font.bold: true }
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        text: "Clear"
+                        onClicked: cmdQueueArea.text = ""
+                    }
+                }
+
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+
+                    TextArea {
+                        id: cmdQueueArea
+                        readOnly: true
+                        wrapMode: TextArea.NoWrap
+                        selectByMouse: true
+                        font.family: "Consolas"
+                        font.pixelSize: 12
+                        implicitWidth: parent.width
+                    }
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: ArduCam
+        function onLogLine(line) {
+            logArea.append(line)
+            logArea.cursorPosition = logArea.length
+        }
+        function onCommandQueued(desc) {
+            cmdQueueArea.append(desc)
+            cmdQueueArea.cursorPosition = cmdQueueArea.length
+        }
+    }
+}
