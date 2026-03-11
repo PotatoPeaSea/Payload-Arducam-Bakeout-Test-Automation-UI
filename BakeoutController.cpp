@@ -6,12 +6,15 @@
 #include <QImageReader>
 #include <QBuffer>
 #include <QTimer>
+#include <QDateTime>
 
 BakeoutController::BakeoutController(ArduCamController* cam, QObject* parent)
     : QObject(parent), m_cam(cam)
 {
     connect(m_cam, &ArduCamController::jpegFrameReceived,
             this,  &BakeoutController::onJpegReceived);
+    connect(m_cam, &ArduCamController::imageCaptureFailed,
+            this,  &BakeoutController::onImageCaptureFailed);
 }
 
 void BakeoutController::setStatus(const QString& s) {
@@ -99,7 +102,10 @@ void BakeoutController::captureImages(const QString& folder, const QString& pref
     m_capturingSeries  = true;
     setBusy(true);
     setStatus(QString("Capturing %1 images at %2°...").arg(count).arg(angle));
-    m_cam->captureSingle();
+    
+    stopStreamingIfActive(); // Ensure stream is off before series starts
+    // Give the camera 300ms to stop streaming before capturing
+    QTimer::singleShot(300, m_cam, [this]() { m_cam->captureSingle(); });
 }
 
 void BakeoutController::cancelCapture() {
@@ -112,6 +118,19 @@ void BakeoutController::cancelCapture() {
 }
 
 // ─── JPEG handler ─────────────────────────────────────────────────────────────
+
+void BakeoutController::onImageCaptureFailed(const QString& reason) {
+    if (m_calibrating) {
+        setStatus("Calibration frame failed (" + reason + "), Retrying...");
+        doNextCalibrationCapture();
+        return;
+    }
+    
+    if (m_capturingSeries) {
+        setStatus("Image capture failed (" + reason + "), Retrying...");
+        m_cam->captureSingle();
+    }
+}
 
 void BakeoutController::onJpegReceived(const QByteArray& jpeg) {
 
@@ -150,6 +169,7 @@ void BakeoutController::onJpegReceived(const QByteArray& jpeg) {
     }
 
     if (m_capturingSeries) {
+
         QBuffer buffer;
         buffer.setData(jpeg);
         buffer.open(QIODevice::ReadOnly);
@@ -166,9 +186,10 @@ void BakeoutController::onJpegReceived(const QByteArray& jpeg) {
         }
 
         int imageNum = m_captureTotal - m_captureRemaining + 1;
-        QString path = QString("%1/%2-%3-%4.jpg")
+        QString timestamp = QDateTime::currentDateTime().toString("HH-mm-ss");
+        QString path = QString("%1/%2-%3-%4-%5.jpg")
                        .arg(m_captureFolder).arg(m_capturePrefix)
-                       .arg(m_captureAngle).arg(imageNum);
+                       .arg(m_captureAngle).arg(imageNum).arg(timestamp);
         QFile f(path);
         if (f.open(QIODevice::WriteOnly)) { f.write(jpeg); f.close(); }
 

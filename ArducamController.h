@@ -6,6 +6,12 @@
 #include <QQueue>
 #include <QTimer>
 
+struct CommandItem {
+    int id;
+    QString description;
+    QByteArray data;
+};
+
 class ArduCamController : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
@@ -13,6 +19,7 @@ class ArduCamController : public QObject {
     Q_PROPERTY(int frameCounter READ frameCounter NOTIFY frameCounterChanged)
     Q_PROPERTY(QString lastLogLine READ lastLogLine NOTIFY lastLogLineChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    Q_PROPERTY(bool initializing READ initializing NOTIFY initializingChanged)
 
 public:
     explicit ArduCamController(QObject* parent = nullptr);
@@ -22,6 +29,7 @@ public:
     int frameCounter() const { return m_frameCounter; }
     QString lastLogLine() const { return m_lastLogLine; }
     bool busy() const { return m_busy; }
+    bool initializing() const { return m_initializing; }
 
     Q_INVOKABLE QStringList availablePorts() const;
 
@@ -63,7 +71,11 @@ signals:
 
     void saveSingleShotsChanged();
     void busyChanged();
-    void commandQueued(const QString &description);
+    void initializingChanged();
+    void commandAdded(int id, const QString &description);
+    void commandStarted(int id);
+    void commandFinished(int id);
+    void imageCaptureFailed(const QString &reason);
 
 private slots:
     void onReadyRead();
@@ -71,8 +83,9 @@ private slots:
     void onWatchdogTimeout();
 
 private:
-    void enqueueCommand(const QByteArray &cmd);
-    void enqueueCommandFront(const QByteArray &cmd);
+    void enqueueCommand(const QString &desc, const QByteArray &cmd);
+    void enqueueCommandFront(const QString &desc, const QByteArray &cmd);
+    void finishActiveCommand();
     void drainQueue();
 
     void processTextLines();
@@ -85,7 +98,11 @@ private:
     QByteArray m_rxBuffer;
     QByteArray m_currentJpeg;
 
-    QQueue<QByteArray> m_cmdQueue;
+    QQueue<CommandItem> m_cmdQueue;
+    int m_nextCmdId = 1;
+    int m_activeCmdId = -1;
+    int m_initLastCmdId = -1;
+
     QTimer m_cmdTimer;
     QTimer m_watchdogTimer;
     bool m_busy = false;
@@ -93,6 +110,7 @@ private:
 
     bool m_connected = false;
     bool m_streaming = false;
+    bool m_initializing = false;
     int m_frameCounter = 0;
     QString m_lastLogLine;
 

@@ -14,7 +14,7 @@ ArduCamController::ArduCamController(QObject* parent) : QObject(parent) {
 
     // Watchdog timer
     m_watchdogTimer.setSingleShot(true);
-    m_watchdogTimer.setInterval(30000); // 30 seconds
+    m_watchdogTimer.setInterval(10000); // 10 seconds
     connect(&m_watchdogTimer, &QTimer::timeout, this, &ArduCamController::onWatchdogTimeout);
 }
 
@@ -50,6 +50,19 @@ void ArduCamController::connectPort(const QString& portName, int baud) {
     m_rxBuffer.clear();
     m_currentJpeg.clear();
     m_state = RxState::Text;
+
+    // Start initialization sequence
+    m_initializing = true;
+    emit initializingChanged();
+    emit logLine("Initializing camera...");
+
+    jpegInit();
+    stopStreaming();
+    setResolution(0);
+    setAutoExposure(true);
+    
+    // Store the ID of the last command enqueued (setAutoExposure)
+    m_initLastCmdId = m_nextCmdId - 1;
 }
 
 void ArduCamController::disconnectPort() {
@@ -58,6 +71,7 @@ void ArduCamController::disconnectPort() {
     m_watchdogTimer.stop();
     m_cmdQueue.clear();
     m_waitingForJpeg = false;
+    m_activeCmdId = -1;
     if (m_busy) {
         m_busy = false;
         emit busyChanged();
@@ -68,6 +82,12 @@ void ArduCamController::disconnectPort() {
 
     m_connected = false;
     m_streaming = false;
+    
+    if (m_initializing) {
+        m_initializing = false;
+        emit initializingChanged();
+    }
+    
     emit connectedChanged();
     emit streamingChanged();
     emit logLine("COM is closed!");
@@ -75,20 +95,38 @@ void ArduCamController::disconnectPort() {
 
 // ── Command queue ────────────────────────────────────────────
 
-void ArduCamController::enqueueCommand(const QByteArray &cmd) {
-    m_cmdQueue.enqueue(cmd);
+void ArduCamController::finishActiveCommand() {
+    if (m_activeCmdId != -1) {
+        emit commandFinished(m_activeCmdId);
+        if (m_initializing && m_activeCmdId == m_initLastCmdId) {
+            m_initializing = false;
+            emit initializingChanged();
+            emit logLine("Initialization complete.");
+        }
+        m_activeCmdId = -1;
+    }
+}
+
+void ArduCamController::enqueueCommand(const QString &desc, const QByteArray &cmd) {
+    int id = m_nextCmdId++;
+    m_cmdQueue.enqueue({id, desc, cmd});
+    emit commandAdded(id, desc);
     if (!m_busy)
         drainQueue();
 }
 
-void ArduCamController::enqueueCommandFront(const QByteArray &cmd) {
-    m_cmdQueue.prepend(cmd);
+void ArduCamController::enqueueCommandFront(const QString &desc, const QByteArray &cmd) {
+    int id = m_nextCmdId++;
+    m_cmdQueue.prepend({id, desc, cmd});
+    emit commandAdded(id, desc);
     if (!m_busy)
         drainQueue();
 }
 
 void ArduCamController::drainQueue() {
     if (m_cmdQueue.isEmpty()) {
+        finishActiveCommand();
+
         if (m_busy) {
             m_busy = false;
             emit busyChanged();
@@ -97,9 +135,14 @@ void ArduCamController::drainQueue() {
         return;
     }
 
-    QByteArray cmd = m_cmdQueue.dequeue();
-    m_serial.write(cmd);
+    finishActiveCommand();
+
+    CommandItem item = m_cmdQueue.dequeue();
+    m_activeCmdId = item.id;
+    m_serial.write(item.data);
     m_serial.flush();
+    
+    emit commandStarted(item.id);
 
     if (!m_busy) {
         m_busy = true;
@@ -111,7 +154,7 @@ void ArduCamController::drainQueue() {
     // For CAPTURE_SINGLE (0x10): don't use the pacing timer.
     // Instead, hold the queue until the full JPEG response has been received.
     // This prevents the next 0x10 arriving while the camera is still capturing.
-    if (cmd.size() == 1 && (quint8)cmd[0] == 0x10) {
+    if (item.data.size() == 1 && (quint8)item.data[0] == 0x10) {
         m_waitingForJpeg = true;
         // drainQueue() will be called again from onReadyRead() once JPEG completes
     } else {
@@ -122,6 +165,10 @@ void ArduCamController::drainQueue() {
 void ArduCamController::onWatchdogTimeout() {
     if (m_busy || m_waitingForJpeg) {
         emit logLine("ERROR: Command watchdog timeout! Force-draining queue.");
+        finishActiveCommand();
+        if (m_waitingForJpeg) {
+            emit imageCaptureFailed("Watchdog timeout");
+        }
         m_waitingForJpeg = false;
         drainQueue();
     }
@@ -131,13 +178,11 @@ void ArduCamController::onWatchdogTimeout() {
 
 void ArduCamController::setResolution(int code0to6) {
     if (code0to6 < 0 || code0to6 > 6) return;
-    emit commandQueued(QString("SET_RES [%1]").arg(code0to6));
-    enqueueCommand(QByteArray(1, char((quint8)code0to6)));
+    enqueueCommand(QString("SET_RES [%1]").arg(code0to6), QByteArray(1, char((quint8)code0to6)));
 }
 
 void ArduCamController::jpegInit() {
-    emit commandQueued("JPEG_INIT [0x11]");
-    enqueueCommand(QByteArray(1, char(0x11)));
+    enqueueCommand("JPEG_INIT [0x11]", QByteArray(1, char(0x11)));
 }
 
 void ArduCamController::captureSingle()
@@ -147,22 +192,19 @@ void ArduCamController::captureSingle()
 
     m_pendingSingleShotSave = m_saveSingleShots;
 
-    emit commandQueued("CAPTURE_SINGLE [0x10]");
-    enqueueCommand(QByteArray(1, char(0x10))); // single-shot command
+    enqueueCommand("CAPTURE_SINGLE [0x10]", QByteArray(1, char(0x10))); // single-shot command
 }
 
 
 void ArduCamController::startStreaming() {
     m_streaming = true;
     emit streamingChanged();
-    emit commandQueued("START_STREAM [0x20]");
-    enqueueCommand(QByteArray(1, char(0x20)));
+    enqueueCommand("START_STREAM [0x20]", QByteArray(1, char(0x20)));
 }
 
 void ArduCamController::stopStreaming() {
     // Priority: push stop to the front of the queue
-    emit commandQueued("STOP_STREAM [0x21] (priority)");
-    enqueueCommandFront(QByteArray(1, char(0x21)));
+    enqueueCommandFront("STOP_STREAM [0x21] (priority)", QByteArray(1, char(0x21)));
     m_streaming = false;
     emit streamingChanged();
 }
@@ -238,6 +280,9 @@ void ArduCamController::onReadyRead() {
                         emit logLine("ERROR: JPEG buffer overflow (no FF D9 found). Resetting parser.");
                         m_currentJpeg.clear();
                         m_state = RxState::Text;
+                        if (m_waitingForJpeg) {
+                            emit imageCaptureFailed("JPEG buffer overflow");
+                        }
                         m_waitingForJpeg = false; // Fix permanent queue stall on overflow
                         QTimer::singleShot(50, this, &ArduCamController::drainQueue);
                     }
@@ -278,8 +323,7 @@ void ArduCamController::setExposureEVIndex(int idx)
     if (idx < 0 || idx >= int(sizeof(cmds)/sizeof(cmds[0])))
         return;
 
-    emit commandQueued(QString("EV_INDEX [0x%1]").arg(cmds[idx], 2, 16, QChar('0')).toUpper());
-    enqueueCommand(QByteArray(1, char(cmds[idx])));
+    enqueueCommand(QString("EV_INDEX [0x%1]").arg(cmds[idx], 2, 16, QChar('0')).toUpper(), QByteArray(1, char(cmds[idx])));
 }
 
 static void appendU32LE(QByteArray& a, quint32 v) {
@@ -300,8 +344,7 @@ void ArduCamController::setAutoExposure(bool enable) {
     p.reserve(2);
     p.append(char(0xF0));
     p.append(char(enable ? 1 : 0));
-    emit commandQueued(QString("AUTO_EXP [0xF0, %1]").arg(enable ? "ON" : "OFF"));
-    enqueueCommand(p);
+    enqueueCommand(QString("AUTO_EXP [0xF0, %1]").arg(enable ? "ON" : "OFF"), p);
 }
 
 void ArduCamController::setExposureUs(quint32 exposureUs) {
@@ -310,8 +353,7 @@ void ArduCamController::setExposureUs(quint32 exposureUs) {
     p.reserve(1 + 4);
     p.append(char(0xF1));
     appendU32LE(p, exposureUs);
-    emit commandQueued(QString("SET_EXP_US [0xF1, %1µs]").arg(exposureUs));
-    enqueueCommand(p);
+    enqueueCommand(QString("SET_EXP_US [0xF1, %1µs]").arg(exposureUs), p);
 }
 
 void ArduCamController::setLineTimeUs(quint16 lineTimeUs) {
@@ -320,8 +362,7 @@ void ArduCamController::setLineTimeUs(quint16 lineTimeUs) {
     p.reserve(1 + 2);
     p.append(char(0xF2));
     appendU16LE(p, lineTimeUs);
-    emit commandQueued(QString("SET_LINE_T [0xF2, %1µs]").arg(lineTimeUs));
-    enqueueCommand(p);
+    enqueueCommand(QString("SET_LINE_T [0xF2, %1µs]").arg(lineTimeUs), p);
 }
 
 void ArduCamController::setSaveSingleShots(bool on)

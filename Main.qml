@@ -58,6 +58,7 @@ ApplicationWindow {
                             Button {
                                 text: ArduCam.connected ? "Close" : "Connect"
                                 Layout.fillWidth: true
+                                enabled: !ArduCam.initializing
                                 onClicked: {
                                     if (!ArduCam.connected)
                                         ArduCam.connectPort(portCombo.currentText, 921600)
@@ -91,7 +92,7 @@ ApplicationWindow {
                                     "2592x1944"
                                 ]
                                 onActivated: ArduCam.setResolution(currentIndex)
-                                enabled: ArduCam.connected && !ArduCam.busy
+                                enabled: ArduCam.connected && !ArduCam.busy && !ArduCam.initializing && !ArduCam.streaming
                             }
                         }
 
@@ -100,7 +101,7 @@ ApplicationWindow {
                             Button {
                                 text: "JPEG Init"
                                 Layout.fillWidth: true
-                                enabled: ArduCam.connected && !ArduCam.busy
+                                enabled: ArduCam.connected && !ArduCam.busy && !ArduCam.initializing && !ArduCam.streaming
                                 onClicked: ArduCam.jpegInit()
                             }
                         }
@@ -112,13 +113,13 @@ ApplicationWindow {
                             Button {
                                 text: "Capture (Single)"
                                 Layout.fillWidth: true
-                                enabled: ArduCam.connected && !ArduCam.streaming && !ArduCam.busy
+                                enabled: ArduCam.connected && !ArduCam.streaming && !ArduCam.busy && !ArduCam.initializing
                                 onClicked: ArduCam.captureSingle()
                             }
 
                             CheckBox {
                                 text: "Save single shots to ./temp"
-                                enabled: ArduCam.connected && !ArduCam.streaming && !ArduCam.busy
+                                enabled: ArduCam.connected && !ArduCam.streaming && !ArduCam.busy && !ArduCam.initializing
                                 checked: ArduCam.saveSingleShots
                                 onToggled: ArduCam.saveSingleShots = checked
                             }
@@ -129,7 +130,7 @@ ApplicationWindow {
                             Button {
                                 text: ArduCam.streaming ? "Stop Streaming" : "Start Streaming"
                                 Layout.fillWidth: true
-                                enabled: ArduCam.connected && !ArduCam.busy
+                                enabled: ArduCam.connected && !ArduCam.busy && !ArduCam.initializing
                                 onClicked: {
                                     if (!ArduCam.streaming) ArduCam.startStreaming()
                                     else ArduCam.stopStreaming()
@@ -144,7 +145,7 @@ ApplicationWindow {
                             Button {
                                 text: "Pre-Bakeout"
                                 Layout.fillWidth: true
-                                enabled: ArduCam.connected
+                                enabled: ArduCam.connected && !ArduCam.initializing && !ArduCam.streaming && !ArduCam.busy
                                 onClicked: {
                                     var c = Qt.createComponent("BakeoutWizard.qml")
                                     if (c.status === Component.Ready) {
@@ -156,7 +157,7 @@ ApplicationWindow {
                             Button {
                                 text: "Post-Bakeout"
                                 Layout.fillWidth: true
-                                enabled: ArduCam.connected
+                                enabled: ArduCam.connected && !ArduCam.initializing && !ArduCam.streaming && !ArduCam.busy
                                 onClicked: {
                                     var c = Qt.createComponent("BakeoutWizard.qml")
                                     if (c.status === Component.Ready) {
@@ -215,7 +216,7 @@ ApplicationWindow {
                                 id: autoExp
                                 text: "Auto Exposure (EV presets)"
                                 checked: true
-                                enabled: ArduCam.connected
+                                enabled: ArduCam.connected && !ArduCam.initializing && !ArduCam.streaming && !ArduCam.busy
                                 onToggled: {
                                     ArduCam.setAutoExposure(checked)
                                 }
@@ -226,7 +227,7 @@ ApplicationWindow {
                         ComboBox {
                             id: evCombo
                             Layout.fillWidth: true
-                            enabled: ArduCam.connected && autoExp.checked
+                            enabled: ArduCam.connected && autoExp.checked && !ArduCam.initializing && !ArduCam.streaming && !ArduCam.busy
                             model: ["-1.7 EV","-1.3 EV","-1.0 EV","-0.7 EV","-0.3 EV","Default","+0.7 EV","+1.0 EV","+1.3 EV","+1.7 EV"]
                             currentIndex: 5
                             onActivated: ArduCam.setExposureEVIndex(currentIndex)   // your existing EV function
@@ -236,7 +237,7 @@ ApplicationWindow {
 
                         // Manual exposure time (µs)
                         ColumnLayout {
-                            enabled: ArduCam.connected && !autoExp.checked
+                            enabled: ArduCam.connected && !autoExp.checked && !ArduCam.initializing && !ArduCam.streaming && !ArduCam.busy
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -308,7 +309,7 @@ ApplicationWindow {
                                 from: 1
                                 to: 200
                                 value: 20
-                                enabled: ArduCam.connected
+                                enabled: ArduCam.connected && !ArduCam.initializing && !ArduCam.streaming && !ArduCam.busy
                                 onValueModified: ArduCam.setLineTimeUs(value)
                             }
                             Label { text: "(calibration)"; opacity: 0.6 }
@@ -427,7 +428,7 @@ ApplicationWindow {
                     Item { Layout.fillWidth: true }
                     Button {
                         text: "Clear"
-                        onClicked: cmdQueueArea.text = ""
+                        onClicked: cmdQueueModel.clear()
                     }
                 }
 
@@ -436,14 +437,51 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     clip: true
 
-                    TextArea {
-                        id: cmdQueueArea
-                        readOnly: true
-                        wrapMode: TextArea.NoWrap
-                        selectByMouse: true
-                        font.family: "Consolas"
-                        font.pixelSize: 12
+                    ListView {
+                        id: cmdQueueList
+                        model: ListModel { id: cmdQueueModel }
                         implicitWidth: parent.width
+
+                        delegate: Item {
+                            width: ListView.view.width
+                            height: 20
+
+                            RowLayout {
+                                anchors.fill: parent
+                                spacing: 4
+
+                                Label {
+                                    font.family: "Consolas"
+                                    font.pixelSize: 12
+                                    font.bold: model.status === "executing"
+                                    color: {
+                                        if (model.status === "queued") return "gray"
+                                        if (model.status === "executing") return "blue"
+                                        return "green" // executed
+                                    }
+                                    text: {
+                                        if (model.status === "queued") return "[ ]"
+                                        if (model.status === "executing") return "[>]"
+                                        return "[✓]"
+                                    }
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    font.family: "Consolas"
+                                    font.pixelSize: 12
+                                    text: model.desc
+                                    elide: Label.ElideRight
+                                    color: model.status === "queued" ? "gray" : "black"
+                                    font.strikeout: model.status === "executed"
+                                }
+                            }
+                        }
+
+                        // Auto-scroll to bottom like a console
+                        onCountChanged: {
+                            cmdQueueList.currentIndex = cmdQueueList.count - 1
+                        }
                     }
                 }
             }
@@ -456,9 +494,27 @@ ApplicationWindow {
             logArea.append(line)
             logArea.cursorPosition = logArea.length
         }
-        function onCommandQueued(desc) {
-            cmdQueueArea.append(desc)
-            cmdQueueArea.cursorPosition = cmdQueueArea.length
+
+        // Helper to find and update a command in the ListModel
+        function updateCmdStatus(id, newStatus) {
+            for (let i = 0; i < cmdQueueModel.count; ++i) {
+                if (cmdQueueModel.get(i).cmdId === id) {
+                    cmdQueueModel.setProperty(i, "status", newStatus)
+                    break
+                }
+            }
+        }
+
+        function onCommandAdded(id, desc) {
+            cmdQueueModel.append({ "cmdId": id, "desc": desc, "status": "queued" })
+        }
+
+        function onCommandStarted(id) {
+            updateCmdStatus(id, "executing")
+        }
+
+        function onCommandFinished(id) {
+            updateCmdStatus(id, "executed")
         }
     }
 }

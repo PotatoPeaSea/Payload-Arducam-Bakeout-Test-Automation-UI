@@ -43,7 +43,7 @@ Window {
             s.push({ type:"instruction", title:"Physical Setup  4 / 7",
                      body:"Place the target exactly 191.5 cm from the camera, measured from the end of the lens face." })
             s.push({ type:"instruction", title:"Physical Setup  5 / 7",
-                     body:"Check the ArduCam Host live preview. The entire target must be in frame and must fill the entire frame. Reposition if needed." })
+                     body:"Check the live preview below. The entire target must be in frame and must fill the entire frame. Reposition if needed." })
             s.push({ type:"instruction", title:"Physical Setup  6 / 7",
                      body:"Once correctly positioned, secure the ArduCam and all wires with tape. Do not move it again." })
             s.push({ type:"instruction", title:"Physical Setup  7 / 7",
@@ -60,12 +60,14 @@ Window {
                      title:"Starting Camera Preview",
                      body:"Initializing JPEG mode, setting low resolution (320×240), and starting the live preview…" })
             s.push({ type:"instruction", title:"Verify Setup",
-                     body:"Check the live preview in the ArduCam Host window. Confirm the target fills the frame exactly as it did during the Pre-Bakeout test. Reposition if needed, then click Next." })
+                     body:"Check the live preview below. Confirm the target fills the frame exactly as it did during the Pre-Bakeout test. Reposition if needed, then click Next." })
         }
         // Both modes share: stop-stream → optionally calibrate → record/enter exposure
         s.push({ type:"instruction", action:"chooseExposure",
                  title:"Configure Exposure",
-                 body:"You can either run the automatic exposure calibration routine, or enter a known exposure value manually." })
+                 body: mode === "Pre-Bakeout" 
+                       ? "You can either run the automatic exposure calibration routine, or enter a known exposure value manually."
+                       : "Enter the precise exposure value recorded during the Pre-Bakeout test to ensure accurate comparison." })
 
         s.push({ type:"auto", action:"calibrate",
                  title:"Calibrating Exposure",
@@ -309,13 +311,29 @@ Window {
 
             // ── Instruction step
             Column {
-                anchors.centerIn: parent; spacing: 20; width: parent.width * 0.82
+                anchors.centerIn: parent; spacing: 16; width: parent.width * 0.82
                 visible: !complete && stepIndex >= 0 && currentStepObj.type === "instruction"
                 Label { text: currentStepObj.title ?? ""; font.pixelSize: 18; font.bold: true
                         wrapMode: Text.WordWrap; width: parent.width }
                 Label { text: currentStepObj.body ?? ""; font.pixelSize: 13
                         wrapMode: Text.WordWrap; width: parent.width; lineHeight: 1.5 }
                 
+                // Embedded Stream Preview
+                Rectangle {
+                    width: 320; height: 240
+                    color: "black"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: ArduCam.streaming && currentStepObj.action !== "chooseExposure" && currentStepObj.action !== "recordExposure"
+
+                    Image {
+                        anchors.centerIn: parent
+                        source: "image://frame/live?c=" + ArduCam.frameCounter
+                        fillMode: Image.PreserveAspectFit
+                        width: parent.width; height: parent.height
+                        cache: false
+                    }
+                }
+
                 // For chooseExposure step
                 Column {
                     visible: currentStepObj.action === "chooseExposure"
@@ -327,6 +345,7 @@ Window {
                         spacing: 16
                         Button {
                             text: "Run Auto-Calibration →"
+                            visible: mode === "Pre-Bakeout"
                             highlighted: true
                             onClicked: {
                                 skipCalibration = false
@@ -334,7 +353,7 @@ Window {
                             }
                         }
                         
-                        Label { text: "  - or -  "; font.bold: true }
+                        Label { text: "  - or -  "; font.bold: true; visible: mode === "Pre-Bakeout" }
 
                         TextField {
                             id: manualExposureInput
@@ -398,12 +417,28 @@ Window {
 
             // ── Auto step
             Column {
-                anchors.centerIn: parent; spacing: 20; width: parent.width * 0.82
+                anchors.centerIn: parent; spacing: 16; width: parent.width * 0.82
                 visible: !complete && stepIndex >= 0 && currentStepObj.type === "auto"
                 Label { text: currentStepObj.title ?? ""; font.pixelSize: 18; font.bold: true
                         wrapMode: Text.WordWrap; width: parent.width }
                 BusyIndicator { anchors.horizontalCenter: parent.horizontalCenter; running: waitAuto }
                 
+                // Embedded Stream Preview
+                Rectangle {
+                    width: 320; height: 240
+                    color: "black"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: currentStepObj.action === "initialize"
+
+                    Image {
+                        anchors.centerIn: parent
+                        source: "image://frame/live?c=" + ArduCam.frameCounter
+                        fillMode: Image.PreserveAspectFit
+                        width: parent.width; height: parent.height
+                        cache: false
+                    }
+                }
+
                 Button {
                     text: "Stop Capture"
                     anchors.horizontalCenter: parent.horizontalCenter

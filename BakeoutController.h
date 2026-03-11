@@ -38,6 +38,7 @@ signals:
 
 private slots:
     void onJpegReceived(const QByteArray& jpeg);
+    void onImageCaptureFailed(const QString& reason);
 
 private:
     void   setStatus(const QString& s);

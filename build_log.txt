@@ -1,0 +1,10 @@
+[  3%] Built target generate_qmlls_build_ini_file
+[  7%] Built target appCamera-UI_qmlimportscan
+[ 11%] Built target appCamera-UI_copy_qml
+[ 15%] Built target appCamera-UI_copy_res
+[ 15%] Built target appCamera-UI_autogen_timestamp_deps
+[ 19%] Built target appCamera-UI_autogen
+[ 23%] Building CXX object CMakeFiles/appCamera-UI.dir/ArducamController.cpp.obj
+mingw32-make.exe[2]: *** [CMakeFiles\appCamera-UI.dir\build.make:195: CMakeFiles/appCamera-UI.dir/ArducamController.cpp.obj] Error 1
+mingw32-make.exe[1]: *** [CMakeFiles\Makefile2:107: CMakeFiles/appCamera-UI.dir/all] Error 2
+mingw32-make.exe: *** [Makefile:135: all] Error 2
