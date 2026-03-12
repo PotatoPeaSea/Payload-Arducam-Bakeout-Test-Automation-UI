@@ -107,7 +107,18 @@ The system relies on a clean separation of concerns: the visual frontend is writ
 * **`Main.qml` (Application Dashboard):** Acts as the primary control center. It allows the user to configure serial connections, preview the layout, and manually test camera configurations natively.
 * **`BakeoutWizard.qml` (Automated Test Wizard):** A state-machine-driven wizard dialog. It guides the user linearly through the automated calibration and 24-step 360-degree rotation picture-taking loop.
 
+#### Auto Calibration Process
+* The auto calibration process is a two-step process:
+    * First, the software captures a series of images at different exposure settings.
+    * The Images are converted to grayscale and the average luminance (brightness) is calculated for each image.
+    * A binary search is preformed until a target average luminance (brightness) of 160(±5) is reached.
+    * The value of 160(±5) was chosen as an experimentally derived result.
+    * In previous bakeout tests that used a manual exposure process, the average brightness after accounting for outliers (greater or less than 20% of the average before accounting for outliers) was used to determine the exposure value.
+
 #### Logic Layer (C++)
 * **`ArduCamController`:** The core hardware communication and state management layer. It maintains a robust queue for sending hexadecimal commands to the camera. It safely parses the incoming serial byte stream to isolate text logs separately from raw JPEG byte data bursts. It emits decoded images via a signal cleanly.
 * **`BakeoutController`:** The orchestration engine for the Bakeout Test sequence. During calibration, it analyzes decoded JPEGs mathematically to resolve the average luminance (brightness) until an exact exposure microsecond value is found. During capture, it tracks the current rotational degree and dynamically creates localized folders to persist the captured images.
 * **`FrameProvider`:** Bridging image data from C++ to the QML rendering engine quickly. Decoded `QImages` are piped directly through it under the `image://frame/...` URL scheme.
+
+
+    
