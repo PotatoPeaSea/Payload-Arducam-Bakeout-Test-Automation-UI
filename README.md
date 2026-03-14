@@ -113,7 +113,8 @@ The system relies on a clean separation of concerns: the visual frontend is writ
     * The Images are converted to grayscale and the average luminance (brightness) is calculated for each image.
     * A binary search is preformed until a target average luminance (brightness) of 160(±5) is reached.
     * The value of 160(±5) was chosen as an experimentally derived result.
-    * In previous bakeout tests that used a manual exposure process, the average brightness after accounting for outliers (greater or less than 20% of the average before accounting for outliers) was used to determine the exposure value.
+    * A baseline average is calculated without accounting for outliers, call this the basline. 
+    * In previous bakeout tests that used a manual exposure process, the average brightness after accounting for outliers (greater or less than 1.2/0.8 times the baseline, respectively) was used to determine the exposure value. That is to say the exposure value was the final average brightness after acccounting for outliers. 
 
 #### Logic Layer (C++)
 * **`ArduCamController`:** The core hardware communication and state management layer. It maintains a robust queue for sending hexadecimal commands to the camera. It safely parses the incoming serial byte stream to isolate text logs separately from raw JPEG byte data bursts. It emits decoded images via a signal cleanly.
